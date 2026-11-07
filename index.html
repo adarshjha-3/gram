@@ -31,6 +31,8 @@
 .empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);padding:30px}.empty-pill{background:#17212b;padding:10px 18px;border-radius:20px;font-size:13px}.welcome{max-width:390px}.welcome h2{color:#dce6ef;font-size:22px}.welcome p{line-height:1.6}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:5;padding:20px}.overlay.show{display:flex}.modal{width:min(440px,100%);background:var(--panel);border:1px solid #304253;border-radius:14px;padding:23px;box-shadow:0 20px 60px #0008}.modal h2{margin:0 0 8px;font-size:20px}.modal p{font-size:13px;color:var(--muted);line-height:1.5}.modal input{width:100%;padding:13px;background:#0e1621;color:white;border:1px solid #34495d;border-radius:8px;outline:none;margin:9px 0}.modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}.btn{padding:10px 15px;border-radius:8px;background:#293949;color:white}.btn.primary{background:var(--blue)}.error{color:#ff9292;font-size:12px;min-height:17px}
 .mobile-back{display:none;background:transparent;color:white;font-size:22px}
+.storage-tools{display:flex;gap:7px;padding:8px 12px;border-bottom:1px solid var(--line)}
+.storage-tools .btn{font-size:11px;padding:7px 9px}
 @media(max-width:760px){.dock{width:60px;flex-basis:60px;padding:12px 6px}.bot-avatar,.add-bot{width:43px;height:43px}.sidebar{width:calc(100vw - 60px);flex-basis:calc(100vw - 60px)}.main{display:none}.app.chat-open .sidebar{display:none}.app.chat-open .main{display:flex;position:absolute;inset:0 0 0 60px;z-index:2}.mobile-back{display:block}.chat-header{padding:0 12px}.messages{padding:18px 12px}.message{max-width:85%}.composer{padding:10px}.side-head{padding:0 12px}}
 </style>
 </head>
@@ -43,6 +45,11 @@
   </aside>
   <aside class="sidebar">
     <div class="side-head"><div class="side-title" id="sideTitle">Chats</div><div class="status pending" id="connectionStatus"><span class="dot"></span><span id="connectionStatusText">CONNECTING</span></div></div>
+    <div class="storage-tools">
+      <button class="btn" id="exportBackupBtn" type="button">Export backup</button>
+      <button class="btn" id="importBackupBtn" type="button">Import backup</button>
+      <input id="importBackupFile" type="file" accept="application/json,.json" hidden>
+    </div>
     <div class="search"><input id="searchInput" placeholder="Search chats" autocomplete="off"></div>
     <div class="chat-list" id="chatList"><div class="empty">Connect a bot to get started.</div></div>
   </aside>
@@ -319,6 +326,248 @@
   $("messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("composer").requestSubmit();}});
   $("searchInput").addEventListener("input",renderChats);
   $("backBtn").addEventListener("click",()=>app.classList.remove("chat-open"));
+
+  // ==========================================================
+  // ADD-ON: IndexedDB local persistence. Original app logic
+  // above remains intact; this layer wraps its existing methods.
+  // ==========================================================
+  const TMBDB = (() => {
+    const DB_NAME = "TelegramMultiBotDesk";
+    const DB_VERSION = 1;
+    let dbPromise;
+
+    function openDB() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          if (!db.objectStoreNames.contains("storage")) {
+            db.createObjectStore("storage", {keyPath:"id"});
+          }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      return dbPromise;
+    }
+
+    async function get(id) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("storage", "readonly");
+        const request = tx.objectStore("storage").get(id);
+        request.onsuccess = () => resolve(request.result ? request.result.value : null);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    async function put(id, value) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("storage", "readwrite");
+        tx.objectStore("storage").put({id, value, updatedAt:Date.now()});
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+
+    function messageKey(message) {
+      if (message && message.message_id != null) return `id:${message.message_id}`;
+      return [
+        message?.direction || "",
+        message?.timestamp || "",
+        message?.text || ""
+      ].join("|");
+    }
+
+    async function saveMessages(botId, chatId, messages) {
+      const id = `messages:${botId}:${chatId}`;
+      const previous = await get(id) || [];
+      const merged = new Map();
+      [...previous, ...(messages || [])].forEach(message => {
+        merged.set(messageKey(message), message);
+      });
+      await put(id, [...merged.values()]);
+    }
+
+    return {get, put, saveMessages};
+  })();
+
+  // Persist bot and chat metadata after successful server fetch.
+  const originalLoadBots = loadBots;
+  loadBots = async function () {
+    try {
+      await originalLoadBots();
+      if (bots.length) {
+        await TMBDB.put("bots", bots);
+      } else {
+        const savedBots = await TMBDB.get("bots").catch(() => null);
+        if (savedBots && savedBots.length) {
+          bots = savedBots;
+          if (!activeBotId || !bots.some(bot => String(bot.id) === String(activeBotId))) {
+            activeBotId = String(bots[0].id);
+          }
+          renderBots();
+          await loadChats(activeBotId);
+        } else {
+          await TMBDB.put("bots", []);
+        }
+      }
+    } catch (error) {
+      const savedBots = await TMBDB.get("bots").catch(() => null);
+      if (!savedBots || !savedBots.length) throw error;
+      bots = savedBots;
+      if (!activeBotId || !bots.some(bot => String(bot.id) === String(activeBotId))) {
+        activeBotId = String(bots[0].id);
+      }
+      renderBots();
+      if (activeBotId) await loadChats(activeBotId);
+    }
+  };
+
+  const originalLoadChats = loadChats;
+  loadChats = async function (botId) {
+    try {
+      await originalLoadChats(botId);
+      if (String(botId) === String(activeBotId)) {
+        await TMBDB.put(`chats:${botId}`, chats);
+      }
+    } catch (error) {
+      const savedChats = await TMBDB.get(`chats:${botId}`).catch(() => null);
+      if (!savedChats) throw error;
+      if (String(botId) === String(activeBotId)) {
+        chats = savedChats;
+        renderChats();
+      }
+    }
+  };
+
+  // Save message history without changing the original renderer.
+  const originalAppendMessage = appendMessage;
+  appendMessage = function (message) {
+    originalAppendMessage(message);
+    if (activeBotId && activeChatId && message) {
+      TMBDB.saveMessages(activeBotId, activeChatId, [message]).catch(error => {
+        console.error("IndexedDB message save failed:", error);
+      });
+    }
+  };
+
+  // After normal server loading, merge cached history with server history.
+  const originalSelectChat = selectChat;
+  selectChat = async function (id) {
+    await originalSelectChat(id);
+    const botId = activeBotId;
+    const chatId = String(id);
+    const cached = await TMBDB.get(`messages:${botId}:${chatId}`).catch(() => null);
+    if (cached && String(activeBotId) === String(botId) && String(activeChatId) === chatId) {
+      const currentNodes = $("messages").querySelectorAll(".message");
+      if (!currentNodes.length) {
+        renderMessages(cached);
+      } else {
+        await TMBDB.saveMessages(botId, chatId, cached);
+        const combined = await TMBDB.get(`messages:${botId}:${chatId}`);
+        renderMessages(combined || cached);
+      }
+    }
+    await TMBDB.put("lastSelection", {botId, chatId});
+  };
+
+  const originalSelectBot = selectBot;
+  selectBot = async function (id) {
+    await originalSelectBot(id);
+    await TMBDB.put("lastSelection", {botId:String(id), chatId:null});
+  };
+
+  // Export and import browser backup.
+  $("exportBackupBtn").addEventListener("click", async () => {
+    try {
+      const db = await (async () => {
+        const request = indexedDB.open("TelegramMultiBotDesk", 1);
+        return await new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      })();
+      const tx = db.transaction("storage", "readonly");
+      const request = tx.objectStore("storage").getAll();
+      const records = await new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result || []);
+        request.onerror = () => reject(request.error);
+      });
+      const blob = new Blob([JSON.stringify({
+        app:"Telegram Multi-Bot Desk",
+        version:1,
+        exportedAt:new Date().toISOString(),
+        records
+      }, null, 2)], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `telegram-multi-bot-desk-backup-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("Backup export failed: " + error.message);
+    }
+  });
+
+  $("importBackupBtn").addEventListener("click", () => $("importBackupFile").click());
+  $("importBackupFile").addEventListener("change", async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text());
+      if (backup.app !== "Telegram Multi-Bot Desk" || !Array.isArray(backup.records)) {
+        throw new Error("This is not a valid Telegram Multi-Bot Desk backup.");
+      }
+      const db = await (async () => {
+        const request = indexedDB.open("TelegramMultiBotDesk", 1);
+        return await new Promise((resolve, reject) => {
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      })();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("storage", "readwrite");
+        const store = tx.objectStore("storage");
+        backup.records.forEach(record => {
+          if (record && typeof record.id === "string") store.put(record);
+        });
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+      alert("Backup imported. The page will now reload.");
+      location.reload();
+    } catch (error) {
+      alert("Backup import failed: " + error.message);
+    } finally {
+      event.target.value = "";
+    }
+  });
+
+  // Restore last selected bot/chat when the dashboard opens.
+  const originalInitialize = initialize;
+  initialize = async function () {
+    await originalInitialize();
+    if ($("loginOverlay").classList.contains("show")) return;
+    try {
+      const selection = await TMBDB.get("lastSelection");
+      if (selection?.botId && bots.some(bot => String(bot.id) === String(selection.botId))) {
+        await selectBot(String(selection.botId));
+        if (selection.chatId && chats.some(chat => String(chat.chat_id) === String(selection.chatId))) {
+          await selectChat(String(selection.chatId));
+        }
+      }
+    } catch (error) {
+      console.warn("Could not restore last selection:", error);
+    }
+  };
+
+  console.log("IndexedDB browser persistence enabled.");
 
   if (adminKey) {
     // Verify remembered session key; if invalid, initialize() reopens login.
