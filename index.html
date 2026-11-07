@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Telegram Multi-Bot Desk</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+:root{--bg:#0e1621;--panel:#17212b;--panel2:#1f2c3a;--active:#2b5278;--blue:#5288c1;--text:#fff;--muted:#7e8b99;--line:#263544;--green:#62b46b;--danger:#e06b6b}
+*{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}button,input{font:inherit}button{cursor:pointer;border:0}
+.app{height:100dvh;display:flex;overflow:hidden;background:var(--bg)}
+.dock{width:76px;flex:0 0 76px;background:#101923;border-right:1px solid #0a1119;display:flex;align-items:center;flex-direction:column;padding:14px 9px;gap:12px}
+.brand{width:44px;height:44px;border-radius:50%;background:var(--blue);display:grid;place-items:center;font-weight:800;font-size:18px;margin-bottom:7px}
+.bot-list{width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;overflow:auto}
+.bot-avatar,.add-bot{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:#263747;color:#dce8f5;font-weight:700;position:relative;transition:.15s}
+.bot-avatar:hover,.add-bot:hover{background:var(--active)}.bot-avatar.active{outline:3px solid var(--blue);background:var(--active)}
+.add-bot{margin-top:auto;background:#263747;font-size:27px;color:#a9c9e8}
+.sidebar{width:330px;flex:0 0 330px;background:var(--panel);border-right:1px solid #0b121a;display:flex;flex-direction:column;min-width:250px}
+.side-head{height:64px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--line);gap:12px}
+.side-title{font-size:18px;font-weight:700;flex:1}.status{font-size:11px;color:var(--green);display:flex;align-items:center;gap:6px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.search{padding:12px 14px;border-bottom:1px solid var(--line)}.search input{width:100%;border:0;border-radius:8px;background:#242f3d;color:var(--text);padding:11px 13px;outline:none}.search input::placeholder{color:#82909e}
+.chat-list{overflow:auto;flex:1}.chat-row{display:flex;gap:12px;padding:12px 14px;cursor:pointer;min-height:76px;border-bottom:1px solid rgba(255,255,255,.025)}.chat-row:hover{background:#202d3b}.chat-row.active{background:var(--active)}
+.person{width:46px;height:46px;border-radius:50%;background:#496b88;display:grid;place-items:center;flex:0 0 46px;font-weight:700}
+.chat-info{min-width:0;flex:1}.chat-top{display:flex;align-items:center;gap:8px}.chat-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}.time{font-size:11px;color:#a4b0bc;white-space:nowrap}.preview{font-size:13px;color:#a8b4c0;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:#0e1621}
+.chat-header{height:64px;flex:0 0 64px;background:var(--panel);border-bottom:1px solid #111c27;display:flex;align-items:center;padding:0 22px;gap:12px}.header-person{width:40px;height:40px;border-radius:50%;background:#496b88;display:grid;place-items:center;font-weight:700}.header-copy{min-width:0}.header-name{font-weight:700}.header-sub{font-size:12px;color:var(--muted);margin-top:4px}
+.messages{flex:1;overflow:auto;padding:22px max(5%,calc((100% - 850px)/2));display:flex;flex-direction:column;gap:7px;background-color:#0e1621;background-image:radial-gradient(rgba(90,130,165,.06) 1px,transparent 1px);background-size:20px 20px}
+.message{max-width:min(70%,560px);padding:9px 12px 7px;border-radius:11px;background:#182533;align-self:flex-start;box-shadow:0 1px 1px rgba(0,0,0,.15);overflow-wrap:anywhere;white-space:pre-wrap;line-height:1.35;font-size:14px}
+.message.outgoing{align-self:flex-end;background:#2b5278;border-bottom-right-radius:4px}.message.incoming{border-bottom-left-radius:4px}.msg-time{font-size:10px;color:#a9b9c8;text-align:right;margin-top:5px}
+.composer{padding:13px 18px;background:var(--panel);display:flex;align-items:center;gap:12px;border-top:1px solid #111c27}.composer input{flex:1;min-width:0;background:#242f3d;border:0;border-radius:9px;color:white;padding:13px 15px;outline:none}.composer input::placeholder{color:#8a98a6}.send{height:44px;width:48px;border-radius:50%;background:var(--blue);color:white;font-size:19px}.send:disabled{opacity:.45;cursor:not-allowed}
+.empty{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);padding:30px}.empty-pill{background:#17212b;padding:10px 18px;border-radius:20px;font-size:13px}.welcome{max-width:390px}.welcome h2{color:#dce6ef;font-size:22px}.welcome p{line-height:1.6}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:5;padding:20px}.overlay.show{display:flex}.modal{width:min(440px,100%);background:var(--panel);border:1px solid #304253;border-radius:14px;padding:23px;box-shadow:0 20px 60px #0008}.modal h2{margin:0 0 8px;font-size:20px}.modal p{font-size:13px;color:var(--muted);line-height:1.5}.modal input{width:100%;padding:13px;background:#0e1621;color:white;border:1px solid #34495d;border-radius:8px;outline:none;margin:9px 0}.modal-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:15px}.btn{padding:10px 15px;border-radius:8px;background:#293949;color:white}.btn.primary{background:var(--blue)}.error{color:#ff9292;font-size:12px;min-height:17px}
+.mobile-back{display:none;background:transparent;color:white;font-size:22px}
+@media(max-width:760px){.dock{width:60px;flex-basis:60px;padding:12px 6px}.bot-avatar,.add-bot{width:43px;height:43px}.sidebar{width:calc(100vw - 60px);flex-basis:calc(100vw - 60px)}.main{display:none}.app.chat-open .sidebar{display:none}.app.chat-open .main{display:flex;position:absolute;inset:0 0 0 60px;z-index:2}.mobile-back{display:block}.chat-header{padding:0 12px}.messages{padding:18px 12px}.message{max-width:85%}.composer{padding:10px}.side-head{padding:0 12px}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="dock">
+    <div class="brand" title="Telegram Multi-Bot Desk">T</div>
+    <div class="bot-list" id="botList"></div>
+    <button class="add-bot" id="addBotBtn" title="Connect a bot">+</button>
+  </aside>
+  <aside class="sidebar">
+    <div class="side-head"><div class="side-title" id="sideTitle">Chats</div><div class="status"><span class="dot"></span> LIVE</div></div>
+    <div class="search"><input id="searchInput" placeholder="Search chats" autocomplete="off"></div>
+    <div class="chat-list" id="chatList"><div class="empty">Connect a bot to get started.</div></div>
+  </aside>
+  <main class="main">
+    <header class="chat-header" id="chatHeader">
+      <button class="mobile-back" id="backBtn" aria-label="Back">‹</button>
+      <div class="header-person" id="headerAvatar">?</div>
+      <div class="header-copy"><div class="header-name" id="headerName">Select a conversation</div><div class="header-sub" id="headerSub">Your connected bot inbox</div></div>
+    </header>
+    <section class="messages" id="messages">
+      <div class="empty"><div class="welcome"><h2>Telegram Multi-Bot Desk</h2><p>Connect one or more Telegram bots, then select a conversation to read and reply in real time.</p><div class="empty-pill">Your workspace is ready</div></div></div>
+    </section>
+    <form class="composer" id="composer">
+      <input id="messageInput" placeholder="Write a message..." autocomplete="off" disabled>
+      <button class="send" id="sendBtn" type="submit" disabled aria-label="Send">➤</button>
+    </form>
+  </main>
+</div>
+
+<div class="overlay show" id="loginOverlay">
+  <div class="modal">
+    <h2>Unlock your desk</h2><p>Enter the dashboard password configured in the <code>ADMIN_PASSWORD</code> environment variable. The default for local development is <b>change-me-now</b>.</p>
+    <input id="loginPassword" type="password" placeholder="Dashboard password" autocomplete="current-password">
+    <div class="error" id="loginError"></div>
+    <div class="modal-actions"><button class="btn primary" id="loginBtn">Continue</button></div>
+  </div>
+</div>
+<div class="overlay" id="addBotOverlay">
+  <div class="modal">
+    <h2>Connect Telegram bot</h2><p>Paste the bot token from BotFather. It stays in this server's memory and is never sent back to the browser.</p>
+    <input id="botToken" type="password" placeholder="123456:ABC-..." autocomplete="off">
+    <div class="error" id="botError"></div>
+    <div class="modal-actions"><button class="btn" id="cancelBot">Cancel</button><button class="btn primary" id="connectBot">Connect bot</button></div>
+  </div>
+</div>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const app = $("app");
+  let adminKey = sessionStorage.getItem("tmbd_admin_key") || "";
+  let socket = null, bots = [], activeBotId = null, chats = [], activeChatId = null;
+  const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const initials = name => String(name || "?").trim().split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase() || "?";
+  const api = async (url, options={}) => {
+    const response = await fetch(url, {...options, headers: {...(options.headers||{}), "Content-Type":"application/json", "X-Admin-Key":adminKey}});
+    const data = await response.json().catch(()=>({ok:false,error:"Invalid server response"}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed (${response.status})`);
+    return data;
+  };
+  const showModal = id => $(id).classList.add("show");
+  const hideModal = id => $(id).classList.remove("show");
+  const formatTime = value => {
+    if (!value) return "";
+    const d = new Date(value);
+    return isNaN(d) ? "" : d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  };
+
+  async function login() {
+    $("loginError").textContent = "";
+    try {
+      const password = $("loginPassword").value;
+      const r = await fetch("/api/login", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});
+      const data = await r.json();
+      if (!r.ok || !data.ok) throw new Error(data.error || "Login failed");
+      adminKey = password;
+      sessionStorage.setItem("tmbd_admin_key", adminKey);
+      hideModal("loginOverlay");
+      await initialize();
+    } catch (e) {$("loginError").textContent = e.message;}
+  }
+
+  async function initialize() {
+    try {
+      await loadBots();
+      connectSocket();
+    } catch (e) {
+      sessionStorage.removeItem("tmbd_admin_key");
+      adminKey = "";
+      $("loginError").textContent = "Session check failed. Please sign in again.";
+      showModal("loginOverlay");
+    }
+  }
+
+  function connectSocket() {
+    if (socket) socket.disconnect();
+    socket = io({auth:{admin_key:adminKey}});
+    socket.on("connect_error", () => console.warn("Realtime connection unavailable; REST refresh remains available."));
+    socket.on("new_message", message => {
+      if (String(message.bot_id) !== String(activeBotId)) return;
+      if (!chats.some(c=>String(c.chat_id)===String(message.chat_id))) {
+        loadChats(activeBotId).catch(console.error);
+      } else {
+        const chat = chats.find(c=>String(c.chat_id)===String(message.chat_id));
+        chat.last_message = message.text;
+        chat.last_timestamp = message.timestamp;
+        renderChats();
+      }
+      if (String(message.chat_id) === String(activeChatId)) appendMessage(message);
+    });
+  }
+
+  async function loadBots() {
+    const data = await api("/api/bots");
+    bots = data.bots || [];
+    renderBots();
+    if (!activeBotId && bots.length) await selectBot(String(bots[0].id));
+    else if (activeBotId && !bots.some(b=>String(b.id)===String(activeBotId))) {
+      activeBotId = null; activeChatId = null; chats = []; renderChats(); renderMessages();
+    }
+  }
+
+  function renderBots() {
+    $("botList").innerHTML = bots.map(bot => `<button class="bot-avatar ${String(bot.id)===String(activeBotId)?"active":""}" data-id="${esc(bot.id)}" title="${esc(bot.name)} (@${esc(bot.username)})">${esc(initials(bot.name))}</button>`).join("");
+    $("botList").querySelectorAll("button").forEach(btn=>btn.addEventListener("click",()=>selectBot(btn.dataset.id)));
+    $("sideTitle").textContent = bots.find(b=>String(b.id)===String(activeBotId))?.name || "Chats";
+  }
+
+  async function selectBot(id) {
+    activeBotId = String(id); activeChatId = null; app.classList.remove("chat-open");
+    renderBots(); $("headerName").textContent = "Select a conversation";
+    $("headerSub").textContent = "@" + (bots.find(b=>String(b.id)===activeBotId)?.username || "Telegram bot");
+    $("headerAvatar").textContent = "?"; $("messageInput").disabled = true; $("sendBtn").disabled = true;
+    await loadChats(activeBotId); renderMessages();
+  }
+
+  async function loadChats(botId) {
+    const data = await api(`/api/bot/${encodeURIComponent(botId)}/chats`);
+    if (String(botId) !== String(activeBotId)) return;
+    chats = data.chats || []; renderChats();
+  }
+
+  function renderChats() {
+    const query = $("searchInput").value.trim().toLowerCase();
+    const filtered = chats.filter(c => `${c.name} ${c.username} ${c.last_message}`.toLowerCase().includes(query));
+    $("chatList").innerHTML = filtered.length ? filtered.map(c => `
+      <div class="chat-row ${String(c.chat_id)===String(activeChatId)?"active":""}" data-id="${esc(c.chat_id)}">
+        <div class="person">${esc(initials(c.name))}</div>
+        <div class="chat-info"><div class="chat-top"><div class="chat-name">${esc(c.name)}</div><div class="time">${esc(formatTime(c.last_timestamp))}</div></div>
+        <div class="preview">${esc(c.last_message || "No messages yet")}</div></div>
+      </div>`).join("") : `<div class="empty">${chats.length ? "No matching chats." : "No messages yet. New conversations will appear here."}</div>`;
+    $("chatList").querySelectorAll(".chat-row").forEach(row=>row.addEventListener("click",()=>selectChat(row.dataset.id)));
+  }
+
+  async function selectChat(id) {
+    activeChatId = String(id); app.classList.add("chat-open");
+    const chat = chats.find(c=>String(c.chat_id)===activeChatId);
+    if (!chat) return;
+    $("headerName").textContent = chat.name;
+    $("headerSub").textContent = chat.username ? "@"+chat.username : "Telegram conversation";
+    $("headerAvatar").textContent = initials(chat.name);
+    $("messageInput").disabled = false; $("sendBtn").disabled = false;
+    renderChats();
+    try {
+      const data = await api(`/api/bot/${encodeURIComponent(activeBotId)}/chat/${encodeURIComponent(activeChatId)}/messages`);
+      if (String(activeChatId) === String(id)) renderMessages(data.messages || []);
+    } catch(e) {console.error(e);}
+    $("messageInput").focus();
+  }
+
+  function appendMessage(message) {
+    const node = document.createElement("div");
+    node.className = `message ${message.direction === "outgoing" ? "outgoing" : "incoming"}`;
+    node.innerHTML = `${esc(message.text)}<div class="msg-time">${esc(formatTime(message.timestamp))}</div>`;
+    $("messages").appendChild(node);
+    $("messages").scrollTop = $("messages").scrollHeight;
+  }
+
+  function renderMessages(items=[]) {
+    if (!activeChatId) {
+      $("messages").innerHTML = `<div class="empty"><div class="welcome"><h2>Choose a chat</h2><p>Select a user from the sidebar to view the conversation.</p></div></div>`;
+      return;
+    }
+    $("messages").innerHTML = "";
+    items.forEach(appendMessage);
+    $("messages").scrollTop = $("messages").scrollHeight;
+  }
+
+  async function sendMessage(event) {
+    event.preventDefault();
+    const input = $("messageInput"), text = input.value.trim();
+    if (!text || !activeBotId || !activeChatId) return;
+    $("sendBtn").disabled = true;
+    try {
+      const data = await api("/api/send_message", {method:"POST",body:JSON.stringify({bot_id:activeBotId,chat_id:activeChatId,text})});
+      // The server also emits new_message; avoid duplicating that socket event.
+      input.value = "";
+      if (!socket || !socket.connected) appendMessage(data.message);
+    } catch(e) {
+      alert(e.message);
+    } finally {$("sendBtn").disabled = false; input.focus();}
+  }
+
+  $("loginBtn").addEventListener("click", login);
+  $("loginPassword").addEventListener("keydown", e=>{if(e.key==="Enter")login();});
+  $("addBotBtn").addEventListener("click",()=>{ $("botToken").value=""; $("botError").textContent=""; showModal("addBotOverlay"); $("botToken").focus(); });
+  $("cancelBot").addEventListener("click",()=>hideModal("addBotOverlay"));
+  $("connectBot").addEventListener("click",async()=>{
+    const token=$("botToken").value.trim(); $("botError").textContent="";
+    if(!token){$("botError").textContent="Paste a bot token first.";return;}
+    $("connectBot").disabled=true;
+    try {
+      const data=await api("/api/add_bot",{method:"POST",body:JSON.stringify({token})});
+      hideModal("addBotOverlay"); await loadBots(); await selectBot(String(data.bot.id));
+    } catch(e){$("botError").textContent=e.message;}
+    finally{$("connectBot").disabled=false;}
+  });
+  $("composer").addEventListener("submit",sendMessage);
+  $("messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("composer").requestSubmit();}});
+  $("searchInput").addEventListener("input",renderChats);
+  $("backBtn").addEventListener("click",()=>app.classList.remove("chat-open"));
+
+  if (adminKey) {
+    // Verify remembered session key; if invalid, initialize() reopens login.
+    initialize();
+  }
+})();
+</script>
+</body>
+</html>
