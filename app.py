@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 ROOT = os.path.dirname(os.path.abspath(__file__))
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me-now")
 
-app = Flask(__name__, static_folder=None)
+app = Flask(__name__, static_folder=os.path.join(ROOT, "vendor"), static_url_path="/vendor")
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", secrets.token_hex(32))
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins=[])
 
@@ -119,6 +119,8 @@ def index():
 
 @app.post("/api/login")
 def login():
+    if not ADMIN_PASSWORD:
+        return jsonify({"ok": False, "error": "Dashboard password is not configured."}), 503
     data = request.get_json(silent=True) or {}
     supplied = str(data.get("password", ""))
     if not secrets.compare_digest(supplied, ADMIN_PASSWORD):
