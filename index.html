@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Telegram Multi-Bot Desk</title>
+<meta name="theme-color" content="#0e1621">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ishogram">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<title>ishogram</title>
 <script src="/vendor/socket.io.min.js"></script>
 <style>
 :root{--bg:#0e1621;--panel:#17212b;--panel2:#1f2c3a;--active:#2b5278;--blue:#5288c1;--text:#fff;--muted:#7e8b99;--line:#263544;--green:#62b46b;--danger:#e06b6b}
@@ -574,6 +581,17 @@
     initialize();
   }
 })();
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js", {
+      scope: "/"
+    }).catch(error => {
+      console.warn("ishogram service worker registration failed:", error);
+    });
+  });
+}
 </script>
 </body>
 </html>
