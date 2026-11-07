@@ -1,3 +1,4 @@
+
 """Flask + Socket.IO backend for Telegram Multi-Bot Desk.
 
 This app intentionally stores state in memory only. Restarting the process clears
@@ -115,6 +116,38 @@ def handle_incoming(bot_id: str, message: dict):
 @app.get("/")
 def index():
     return send_from_directory(ROOT, "index.html")
+
+
+# ==========================================================
+# PWA ROUTES
+# Added without changing the existing application logic.
+# ==========================================================
+
+@app.get("/service-worker.js")
+def service_worker():
+    response = send_from_directory(
+        ROOT,
+        "service-worker.js",
+        mimetype="application/javascript"
+    )
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.get("/manifest.json")
+def pwa_manifest():
+    return send_from_directory(
+        ROOT,
+        "manifest.json",
+        mimetype="application/manifest+json"
+    )
+
+
+@app.get("/static/icons/<path:filename>")
+def pwa_icons(filename):
+    icons_directory = os.path.join(ROOT, "static", "icons")
+    return send_from_directory(icons_directory, filename)
 
 
 @app.post("/api/login")
