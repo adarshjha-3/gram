@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Telegram Multi-Bot Desk</title>
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/vendor/socket.io.min.js"></script>
 <style>
 :root{--bg:#0e1621;--panel:#17212b;--panel2:#1f2c3a;--active:#2b5278;--blue:#5288c1;--text:#fff;--muted:#7e8b99;--line:#263544;--green:#62b46b;--danger:#e06b6b}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}button,input{font:inherit}button{cursor:pointer;border:0}
@@ -17,7 +17,7 @@
 .add-bot{margin-top:auto;background:#263747;font-size:27px;color:#a9c9e8}
 .sidebar{width:330px;flex:0 0 330px;background:var(--panel);border-right:1px solid #0b121a;display:flex;flex-direction:column;min-width:250px}
 .side-head{height:64px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--line);gap:12px}
-.side-title{font-size:18px;font-weight:700;flex:1}.status{font-size:11px;color:var(--green);display:flex;align-items:center;gap:6px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.side-title{font-size:18px;font-weight:700;flex:1}.status{font-size:11px;color:var(--green);display:flex;align-items:center;gap:6px}.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}.status.pending{color:#e6bd64}.status.pending .dot{background:#e6bd64}.status.offline{color:#e06b6b}.status.offline .dot{background:#e06b6b}
 .search{padding:12px 14px;border-bottom:1px solid var(--line)}.search input{width:100%;border:0;border-radius:8px;background:#242f3d;color:var(--text);padding:11px 13px;outline:none}.search input::placeholder{color:#82909e}
 .chat-list{overflow:auto;flex:1}.chat-row{display:flex;gap:12px;padding:12px 14px;cursor:pointer;min-height:76px;border-bottom:1px solid rgba(255,255,255,.025)}.chat-row:hover{background:#202d3b}.chat-row.active{background:var(--active)}
 .person{width:46px;height:46px;border-radius:50%;background:#496b88;display:grid;place-items:center;flex:0 0 46px;font-weight:700}
@@ -42,7 +42,7 @@
     <button class="add-bot" id="addBotBtn" title="Connect a bot">+</button>
   </aside>
   <aside class="sidebar">
-    <div class="side-head"><div class="side-title" id="sideTitle">Chats</div><div class="status"><span class="dot"></span> LIVE</div></div>
+    <div class="side-head"><div class="side-title" id="sideTitle">Chats</div><div class="status pending" id="connectionStatus"><span class="dot"></span><span id="connectionStatusText">CONNECTING</span></div></div>
     <div class="search"><input id="searchInput" placeholder="Search chats" autocomplete="off"></div>
     <div class="chat-list" id="chatList"><div class="empty">Connect a bot to get started.</div></div>
   </aside>
@@ -83,17 +83,25 @@
   const $ = id => document.getElementById(id);
   const app = $("app");
   let adminKey = sessionStorage.getItem("tmbd_admin_key") || "";
-  let socket = null, bots = [], activeBotId = null, chats = [], activeChatId = null;
+  let socket = null, restRefreshTimer = null, bots = [], activeBotId = null, chats = [], activeChatId = null;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const initials = name => String(name || "?").trim().split(/\s+/).slice(0,2).map(x=>x[0]||"").join("").toUpperCase() || "?";
   const api = async (url, options={}) => {
     const response = await fetch(url, {...options, headers: {...(options.headers||{}), "Content-Type":"application/json", "X-Admin-Key":adminKey}});
     const data = await response.json().catch(()=>({ok:false,error:"Invalid server response"}));
-    if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed (${response.status})`);
+    if (!response.ok || data.ok === false) {
+      const error = new Error(data.error || `Request failed (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   };
   const showModal = id => $(id).classList.add("show");
   const hideModal = id => $(id).classList.remove("show");
+  function setConnectionStatus(status, className) {
+    $("connectionStatusText").textContent = status;
+    $("connectionStatus").className = `status ${className}`;
+  }
   const formatTime = value => {
     if (!value) return "";
     const d = new Date(value);
@@ -117,19 +125,77 @@
   async function initialize() {
     try {
       await loadBots();
-      connectSocket();
     } catch (e) {
-      sessionStorage.removeItem("tmbd_admin_key");
-      adminKey = "";
-      $("loginError").textContent = "Session check failed. Please sign in again.";
+      if (e.status === 401) {
+        sessionStorage.removeItem("tmbd_admin_key");
+        adminKey = "";
+        $("loginError").textContent = "Session expired. Please sign in again.";
+      } else {
+        console.error("Dashboard initialization failed:", e);
+        $("loginError").textContent = `Could not load dashboard: ${e.message}`;
+      }
       showModal("loginOverlay");
+      return;
     }
+    hideModal("loginOverlay");
+    connectSocket();
+  }
+
+  function startRestRefresh() {
+    if (restRefreshTimer) return;
+    restRefreshTimer = setInterval(async () => {
+      try {
+        await loadBots();
+        if (activeBotId) await loadChats(activeBotId);
+        if (activeBotId && activeChatId) {
+          const botId = activeBotId, chatId = activeChatId;
+          const data = await api(`/api/bot/${encodeURIComponent(botId)}/chat/${encodeURIComponent(chatId)}/messages`);
+          if (String(activeBotId) === String(botId) && String(activeChatId) === String(chatId)) {
+            renderMessages(data.messages || []);
+          }
+        }
+      } catch (e) {
+        console.warn("Dashboard refresh failed:", e);
+      }
+    }, 5000);
+  }
+
+  function stopRestRefresh() {
+    if (!restRefreshTimer) return;
+    clearInterval(restRefreshTimer);
+    restRefreshTimer = null;
   }
 
   function connectSocket() {
     if (socket) socket.disconnect();
-    socket = io({auth:{admin_key:adminKey}});
-    socket.on("connect_error", () => console.warn("Realtime connection unavailable; REST refresh remains available."));
+    if (typeof io !== "function") {
+      console.warn("Socket.IO client failed to load; using REST refresh.");
+      setConnectionStatus("REST MODE", "offline");
+      startRestRefresh();
+      return;
+    }
+    setConnectionStatus("CONNECTING", "pending");
+    try {
+      socket = io({auth:{admin_key:adminKey}});
+    } catch (e) {
+      console.warn("Realtime connection unavailable; using REST refresh:", e);
+      setConnectionStatus("REST MODE", "offline");
+      startRestRefresh();
+      return;
+    }
+    socket.on("connect", () => {
+      setConnectionStatus("LIVE", "");
+      stopRestRefresh();
+    });
+    socket.on("disconnect", () => {
+      setConnectionStatus("RECONNECTING", "pending");
+      startRestRefresh();
+    });
+    socket.on("connect_error", () => {
+      console.warn("Realtime connection unavailable; using REST refresh.");
+      setConnectionStatus("REST MODE", "offline");
+      startRestRefresh();
+    });
     socket.on("new_message", message => {
       if (String(message.bot_id) !== String(activeBotId)) return;
       if (!chats.some(c=>String(c.chat_id)===String(message.chat_id))) {
